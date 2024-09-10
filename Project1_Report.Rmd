@@ -1,0 +1,388 @@
+---
+title: 'SDS 322E: Project 1 Report'
+output:
+  html_document: default
+  word_document: default
+  pdf_document: default
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE) # Set global chunk options
+knitr::opts_knit$set(root.dir = '/Users/nataliaortegaarriaga/Project1') # Set the working directory
+```
+
+```{r}
+library(tidyverse)
+```
+
+```{r}
+
+championships <- read_tsv("WCA_export_championships.tsv.bz2")
+
+competitions <- read_tsv("WCA_export_Competitions.tsv.bz2")
+
+continents <- read_tsv("WCA_export_Continents.tsv.bz2")
+
+countries <- read_tsv("WCA_export_Countries.tsv.bz2")
+
+eligible_country_iso2s_for_championship <- read_tsv("WCA_export_eligible_country_iso2s_for_championship.tsv.bz2")
+
+events <- read_tsv("WCA_export_Events.tsv.bz2")
+
+formats <- read_tsv("WCA_export_Formats.tsv.bz2")
+
+persons <- read_tsv("WCA_export_Persons.tsv.bz2")
+
+ranksaverage <- read_tsv("WCA_export_RanksAverage_333.tsv.bz2")
+
+rankssingle <- read_tsv("WCA_export_RanksSingle_333.tsv.bz2")
+
+results <- read_tsv("WCA_export_Results_333.tsv.bz2")
+
+roundtypes <- read_tsv("WCA_export_RoundTypes.tsv.bz2")
+
+scrambles <- read_tsv("WCA_export_Scrambles.tsv.bz2")
+```
+
+## Required Questions
+
+### Active Speed Cubers
+
+How many active (3x3x3) speedcubers are there registered with the WCA? For this question an *active speeedcuber* is defined as any person registered in the WCA who has competed in at least two competitions in the years 2022--2024. 
+
+
+```{r}
+## filter the competitions to only after 2022, then join with the results database.
+## group by personId and Id to group all the rounds of all the competitions together
+## do a second group by to see how many competitions each person has participated in
+
+competitions |> 
+  filter(year >= 2022) |> 
+  select(id, year) |> 
+  inner_join(results, by = c('id' = 'competitionId')) |> 
+  group_by(personId, id) |> 
+  summarize(count = n(),.groups = "drop") |> 
+  group_by(personId) |> 
+  summarize(count = n(),.groups = "drop") |> 
+  filter(count >= 2) |> 
+  summarize(count = n(),.groups = "drop")
+```
+
+
+### World Records
+
+This question has two parts:
+
+1. Who holds the current world record single? On what date was this record set?
+
+```{r}
+## Find who had the best result -> see what day it happened on
+best_result <- results |> 
+  filter(best > 0) |> 
+  filter(best == min(best)) |> 
+  inner_join(competitions, by = c('competitionId' = 'id'))
+
+best_date <- paste(best_result$month, "/", best_result$day, "/", best_result$year, sep = "")
+best_date <- as.Date(best_date, format="%m/%d/%Y")
+print(best_date)
+print(best_result$personName)
+```
+
+2. Who *previously* held the world record single? On what date was this previous record set?
+
+```{r}
+## Filter to get competitions before the new record was set -> get date of old record
+
+prev_best <- competitions |> 
+  filter(as.Date(paste(competitions$month, "/", competitions$day, "/", competitions$year, sep = ""), format="%m/%d/%Y") < best_date) |> 
+  inner_join(results, by = c('id' = 'competitionId')) |> 
+  filter(best > 0) |> 
+  filter(best == min(best))
+
+  prev_best_date <- paste(prev_best$month, "/", prev_best$day, "/", prev_best$year, sep = "")
+  prev_best_date <- as.Date(prev_best_date, format="%m/%d/%Y")
+  print(prev_best_date)
+  print(prev_best$personName)
+
+```
+
+
+
+### Regional Rankings
+
+This question has two parts:
+
+1. Who is the top ranked male speedcuber (for single best time) in Australia? 
+
+```{r}
+## filter to male Australians, then see which has the lowest number rank (filter out 0s for those who aren't ranked)
+
+top_aussie <- persons |> 
+  filter(countryId == 'Australia' & gender == 'm') |> 
+  inner_join(rankssingle, by = c('id' = 'personId')) |> 
+  filter(countryRank > 0) |> 
+  filter(countryRank == min(countryRank))
+top_aussie$name
+  
+  
+```
+
+
+2. Who is the top ranked female speedcuber (for single best time) in Europe?
+
+```{r}
+## join so we can filter by females in Europe, then get the min rank in that contintent
+top_Euro <- persons |> 
+  inner_join(countries, by = c('countryId' = 'id')) |> 
+  filter(continentId == '_Europe' & gender == 'f') |> 
+  inner_join(rankssingle, by = c('id' = 'personId')) |> 
+  filter(continentRank == min(continentRank))
+top_Euro$name.x
+```
+
+
+### Time Until Sub-5
+
+Having a time below 5 seconds is considered an elite achievement and most speedcubers have to complete a large number of solves before they can obtain a sub-5 second solve. 
+
+1. For the current top 10 speedcubers in the world (as recorded in the RanksSingle table), on average, how many solves did they have to do before achieving a sub-5 second solve?
+
+```{r}
+## Filter down to top 10 and add on which competitions they partook in
+## Make the table a long table where all of the values are in one column
+## Sort by date, then find the date of the first sub 500
+## Then sum the dates prior for each individual
+## Average each summation
+top_10 <- rankssingle |> 
+  filter(worldRank <= 10) |> 
+  select(personId) |> 
+  inner_join(results, by = c('personId')) |> 
+  select(-pos, -best, -average, -formatId, -regionalSingleRecord, -regionalAverageRecord, -personCountryId)
+
+comp <- competitions |> 
+  mutate(date = as.Date(paste0(year, "-", month, "-", day))) |> 
+  select(id, date)
+
+top_comp = inner_join(top_10, comp, by = c('competitionId' = 'id'))
+
+top_comp |> 
+  pivot_longer(
+    cols = starts_with("value"), 
+    names_to = "value_name", 
+    values_to = "value"
+  ) |> 
+  mutate(value = ifelse(value <= 0 | is.na(value), +Inf, value)) |> 
+  arrange(date) |> 
+  group_by(personName) |> 
+  summarise(
+    firstSolveDate = date[min(which(value < 500))], 
+    firstSolveCount = sum(date < firstSolveDate)) |> 
+  summarise(mean_solves_before_500 = mean(firstSolveCount, na.rm = T))
+```
+
+2. For one of the top 10 speedcubers make a plot of their solve times vs. the date of the solve, with date on the x-axis and solve time on the y-axis. 
+
+```{r}
+## Plot for Max Park and how he improved over time 
+## values at the top indicate not finishing
+top_comp |> 
+  filter(personName == 'Max Park') |> 
+  pivot_longer(
+    cols = starts_with("value"), 
+    names_to = "value_name", 
+    values_to = "value") |> 
+  mutate(value = ifelse(value <= 0, +Inf, value)) |> 
+  arrange(date) |> 
+  ggplot(aes(x = date, y = value)) +
+  geom_point(alpha = 1/5) +
+  labs(title = "Max Park's Solving times over his career")
+```
+### Up-and-Coming Speed Cubers
+
+Which speed cubers **not** in the top 10,000 (worldwide for single best time) should we keep an eye on for the near future?
+
+The idea here is to identify "up-and-coming" speedcubers who are not yet achieving elite times. Come up with a list of **five** speedcubers (provide their names and WCA IDs) that you have identified as "up-and-coming". There is no one way to answer this question and the goal is to provide an analysis of the data that justifies the selection of your five names.
+
+**Methodology: We will see the average times from 2021 to 2022 and the best average time from 2023 to 2024, and see which cuber improved the most.**
+
+```{r}
+## Average results per person from competitions in 2021 and 2022. 
+up_and_coming_2021_22 <- results %>% 
+  mutate(year = substr(competitionId, nchar(competitionId)-3, nchar(competitionId))) %>%
+  inner_join(rankssingle, by = c("personId")) %>% 
+  filter(year %in% c(2021, 2022)) %>%
+  filter(worldRank > 10000) %>% 
+  filter(average >= 0) %>%
+  group_by(personId, personName,worldRank) %>%
+  summarize(average_score = mean(average, na.rm = TRUE),.groups = "drop") %>%
+  ungroup()
+
+up_and_coming_2021_22
+```
+
+
+```{r}
+#Results of the best scores from either 2023 or 2024 from the people that also competed in 2021 and/or 2022. 
+up_and_coming_2023_24 <- results %>%
+  mutate(year = substr(competitionId, nchar(competitionId)-3, nchar(competitionId)))%>%
+  filter(year %in% c(2023, 2024)) %>%
+  inner_join(up_and_coming_2021_22, by = "personId") %>%
+  filter(worldRank > 10000) %>%
+  filter(average >= 0) %>%
+  arrange(desc(year)) %>%
+  group_by(personId) %>%
+  summarize(most_recent_year = first(year),
+            best_average_score = min(average)) %>%
+  ungroup()
+
+up_and_coming_2023_24
+```
+
+```{r}
+#Subtraction of the most recent score and the average scores of 2021 and 2022 to indicate improvement. 
+comparision <- up_and_coming_2023_24 %>% 
+  left_join(up_and_coming_2021_22, by = c("personId")) %>% 
+  mutate(comparision = abs(best_average_score - average_score)) %>% 
+  select(personId, personName, comparision) %>% 
+  arrange(desc(comparision))
+comparision
+```
+**Answer: The five speedcubers that are up and coming are Sriparameshwaran Iyer, Rudhransh Sammeta, Rafael Hernandez, Federico Florez Bonilla, Michael McIntosh.**
+
+## Additional Questions
+
+### Question 1
+State the question here:
+From 2014 to today in which host country did the competitors perform the best? 
+For this question we are going to merge the data sets of “results” and “competitions” datasets.
+
+State your expectation here:
+The United States will be the country were competitors performed best from 2014 to today.
+
+```{r}
+## Filtered the competitionIds that ended with the years 2014-2024
+#inner joined the data of competitions by id
+#grouped by countryid and then counted the number of competitions and the average performance
+#sliced the first result. 
+results_from_2014 <- results %>%
+  filter(str_detect(competitionId, "2014$|2015$|2016$|2017$|2018$|2019$|2020$|2021$|2022$|2023$|2024$")) %>% 
+  inner_join(competitions, by = c("competitionId" = "id")) %>% 
+  group_by(countryId) %>% 
+  summarize(
+    total_competitions = n_distinct(competitionId),
+    average_performance_in_country = mean(average)
+  ) %>% 
+  arrange(average_performance_in_country) %>% 
+  slice(1)
+
+results_from_2014
+```
+**Answer: Luxemburg was the host country with the best performance average since 2014 to today. It is important to note that we used "average" instead of "best" to calculate the performance of the individuals overall.**
+
+
+### Question 2
+
+State the question here:
+What are the top five countries with the most people in the world ranking within the top 100? 
+We will be joining “rankssingle” and “persons” data sets.
+
+State your expectation here:
+We expect that the United States will have the most people with the world ranking within the top 100 because there are more people in this country that have time to do this. China would be second place, followed by Netherlands, Canada, and Poland.
+
+```{r}
+## Filtered anyone who is below the top 100, joined dataset with persons, grouped by countryid and then counted the amount of rows, arranged in descending order and selected the top 5. 
+top_100 <- rankssingle %>% 
+  filter(worldRank <= 100) %>% 
+  inner_join(persons, by = c("personId" = "id")) %>% 
+  group_by(countryId) %>% 
+  count() %>% 
+  arrange(desc(n)) %>% 
+  head(5)
+
+top_100
+```
+**Answer: The top country with the most people within the top 100 is USA, followed by China, Poland, Australia, and Canada.**
+
+### Question 3 (if working in a group)
+
+NOTE: Delete this section if you are NOT working in a group
+
+State the question here:
+Which person from each gender has the lowest ratio of competitions attended to competitions won? (the least amount of experiences to wins.) 
+We will be joining the data set of “results” and “persons”.
+
+State your expectation here:
+Max Park will have the lowest ratio for men and Dana Yi is going to be the lowest for women
+
+
+```{r}
+#In this code chunk I did the results for the male population. 
+#Here I first counted the amount of times a male player participated
+
+participation_male <- results %>% 
+  inner_join(persons, by=c("personName" = "name")) %>% 
+  filter(gender == "m") %>% 
+  group_by(personName) %>%
+  summarise(num_comp = n())
+
+#Then I counted the amount of times a male player won.
+wins_male <- results %>% 
+  inner_join(persons, by=c("personName" = "name")) %>% 
+  filter(gender == "m") %>% 
+  filter(pos == "1") %>% 
+  group_by(personName) %>% 
+  summarise(wins = n())
+
+#Here I divided the wins, by number of competitions to get the top players.
+wins_per_participation <- wins_male %>% 
+  left_join(participation_male, by = c("personName")) %>% 
+  mutate(wins_per_participation = wins/num_comp) %>% 
+  filter(wins_per_participation == max(wins_per_participation)) %>%
+  arrange(desc(num_comp))
+
+wins_per_participation
+
+```
+
+```{r}
+#In this code chunk I did the results for the female population. 
+#Here I first counted the amount of times a female player participated
+participation_female <- results %>% 
+  inner_join(persons, by=c("personName" = "name")) %>% 
+  filter(gender == "f") %>% 
+  group_by(personName) %>%
+  summarise(num_comp = n())
+
+#Then I counted the amount of times a female player won.
+wins_female <- results %>% 
+  inner_join(persons, by=c("personName" = "name")) %>%
+  filter(pos == "1") %>%
+  filter(gender == "f") %>% 
+  group_by(personName) %>% 
+  summarise(wins = n())
+
+#Here I divided the wins, by number of competitions to get the top players.
+wins_female %>% 
+  left_join(participation_female, by = c("personName")) %>% 
+  mutate(wins_per_participation = wins/num_comp) %>% 
+  filter(wins_per_participation == max(wins_per_participation)) %>% 
+  arrange(desc(num_comp))
+
+```
+**Answer: There were 10 males who had a 100% rate of wins to participation which means they won every competition they attended, all of them will be equally considered to have the highest ratio of wins per participation rate. There were 2 women who had a 100% rate of wins to participation which means they won every competition they attended, all of them will be equally considered to have the highest ratio of wins per participation rate.**
+
+## Discussion
+1) Reflection 1: 
+For the first question, our observed data was far from our expectations. We discovered that the host country where speedcubers performed the best in the last decade was Luxembourg, while our expectation was the USA. This result might not be entirely accurate and we might’ve had to expand our question a little bit and analyze the countries that had at least a certain amount of competitions held (maybe 50). Luxemburg only had 2 competitions which is a very small number to to conclude on something. There might’ve been a chance that during those 2 competitions in Luxemburg, there were very good competitors or they all just had a very good competing day.  It is also important to note that we used the indicator of “average" instead of the indicator of “best" to calculate the performance of the individuals overall by personal choice. 
+
+For the second question, our observed data was very similar to our expectations. The data showed that the top countries with the most people within the top 100 are the USA, followed by China, Poland, Australia, and Canada. Our expectations were very similar. We had hypothesized that the top countries were going to be the USA, China, Netherlands, Canada, and Poland, so we almost had the same countries. To make this hypothesis we skimmed over the top 100 list to provide a more accurate hypothesis. 
+
+For the third question, our observed data was very different from our expectations. In this question, for next time, I would’ve been more specific in how the question was formulated. We were trying to see which player had the highest wins per the amount of times they participated. We were expecting to get a single player for men and a single player for women. Nevertheless, multiple players had only attended either 1 or 2 competitions and won that time or both times and therefore had a 100% winning rate. Of the men’s 10 men won 100% of the competitions he attended, and for women, there were 2. If in our question we had specified a minimum amount of competitions attended, we could’ve gotten a more accurate result. 
+
+2) Reflection 2. 
+This project has been the most complex we’ve done in this class so far, the parts we found the most challenging were questions 5 and 6 which took us the most amount of time. We also took a long time trying to figure out the questions we needed to write ourselves. The process was smooth since we organized our time and finished the project on time without a rush, we also had a lot of resources to reach out to. 
+
+3) Reflection 3. 
+We did problems 1 and 2 during our Wednesday discussion. Then we went to office hours with Bosé to ask some questions we had on question number 4. Finally, we looked at previous slides, lectures, and assignments to get inspiration for our code. 
+
+4) Reflection 4. 
+Natalia Ortega, Ricardo Pelayo, and I (Aiman Lakhani) did Part 1 together, but then for Part 2 only Natalia and I worked together. Natalia and I worked together on all of the problems. 
