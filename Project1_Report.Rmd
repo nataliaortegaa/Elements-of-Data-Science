@@ -13,6 +13,7 @@ knitr::opts_knit$set(root.dir = '/Users/nataliaortegaarriaga/Project1') # Set th
 ```{r}
 library(tidyverse)
 ```
+## The first project for the class using R studio. Focused on the statistics for Rubik's World Championship. Analyzed data to understand trends amongst successful competitors and predict the future statistics for the sport. 
 
 ```{r}
 
