@@ -1,0 +1,283 @@
+---
+title: "Project 2 Report"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Group Members (names and EIDs): Natalia Ortega no4432 and Aiman Lakhani al54554
+
+## Introduction
+
+Our dataset contains 876 rows that are each of a different county in the US. We selected the variables we are using depending on the correlation with "value". We chose the ones that had a higher correlation from 0.25. The models that we are using are linear regression, k-nearest neighbors, random forest, and decision trees.
+
+```{r}
+#Load libraries
+library(tidyverse)
+library(tidymodels)
+library(kknn)
+library(randomForest)
+install.packages("rpart")
+library(rpart)
+
+#Load data
+dat <- read_csv("pm25_data.csv.gz")
+```
+
+```{r}
+#Getting the columns have a correlation with value higher than 0.25 to use them in our analysis.
+#Create a matrix of our data to select the numeric values. 
+cor_matrix <- dat %>% 
+  select_if(is.numeric) %>% 
+  cor(dat$value)
+
+# Calculate the correlation coefficients
+cor_vec <- sapply(select(dat, where(is.numeric)), function(x) cor(x, dat$value))
+
+#Get the names of the columns with correlation higher than 0.25.
+high_cor_names <- names(cor_vec)[abs(cor_vec) > 0.25]
+
+high_cor_names
+```
+
+**Answer: The range of our values in the value column ranges from 2 to 23, therefore an RMSE of 2 would mean that our model is pretty accurate. We expect an RMSE of 2 because we also have a lot of variables that have a decent correlation with the data, which can also make our prediction more accurate.**
+
+## Data Wrangling
+
+```{r}
+#Clean the data
+dat_filtered <- dat %>% 
+  select(value,CMAQ,zcta_area,imp_a500,imp_a1000,imp_a5000,imp_a10000,imp_a15000,log_pri_length_25000,log_prisec_length_5000,log_prisec_length_10000,log_prisec_length_15000,log_prisec_length_25000,log_nei_2008_pm25_sum_10000,log_nei_2008_pm25_sum_15000,log_nei_2008_pm25_sum_25000,log_nei_2008_pm10_sum_10000,log_nei_2008_pm10_sum_15000,log_nei_2008_pm10_sum_25000,urc2013,urc2006,aod,lat,lon,state)
+
+# Split data into train and test set.seed(322)
+set.seed(322)
+dat_split <- initial_split(dat_filtered, prop = 0.8)
+train <- training(dat_split)
+test <- testing(dat_split)
+```
+
+```{r}
+#LINEAR REGRESSION ANALYSIS
+
+#Regression 
+fit <- lm(formula = value ~ CMAQ + zcta_area + imp_a500 + imp_a1000 + imp_a5000 + imp_a10000 + imp_a15000 + log_pri_length_25000 + log_prisec_length_5000 + log_prisec_length_10000 + log_prisec_length_15000 + log_prisec_length_25000 + log_nei_2008_pm25_sum_10000 + log_nei_2008_pm25_sum_15000 + log_nei_2008_pm25_sum_25000 + log_nei_2008_pm10_sum_10000 + log_nei_2008_pm10_sum_15000 + log_nei_2008_pm10_sum_25000 + urc2013 + urc2006 + aod, data = train)
+summary(fit)
+
+## predict the values and calculate resids
+values <- predict(fit, newdata = test)
+
+# Calculate the residuals
+residuals <- test$value - values
+
+# Get RMSE
+sqrt(mean(residuals^2))
+
+#2.641683
+```
+
+```{r}
+#K-NEAREST NEIGHBORS ANALYSIS
+
+# Define the KNN model
+knn_spec <- nearest_neighbor(neighbors = 9, weight_func = "rectangular", dist_power = 2) %>%
+  set_engine("kknn") %>%
+  set_mode("regression")
+
+# Create a recipe for preprocessing
+recipe <- recipe(value ~ CMAQ + zcta_area + imp_a500 + imp_a1000 + imp_a5000 + imp_a10000 + imp_a15000 + log_pri_length_25000 + log_prisec_length_5000 + log_prisec_length_10000 + log_prisec_length_15000 + log_prisec_length_25000 + log_nei_2008_pm25_sum_10000 + log_nei_2008_pm25_sum_15000 + log_nei_2008_pm25_sum_25000 + log_nei_2008_pm10_sum_10000 + log_nei_2008_pm10_sum_15000 + log_nei_2008_pm10_sum_25000 + urc2013 + urc2006 + aod, data = train)
+
+# Define the workflow
+workflow <- workflow() %>%
+  add_model(knn_spec) %>%
+  add_recipe(recipe)
+
+# Fit the model
+fit_knn <- workflow %>% fit(data = train)
+
+# Predict on the test set
+predictions <- predict(fit_knn, new_data = test) %>%
+  bind_cols(test) %>%
+  mutate(resid = value - .pred)
+
+# Calculate RMSE
+rmse <- sqrt(mean(predictions$resid^2))
+rmse
+
+#2.430612
+```
+
+```{r}
+# DECISION TREES ANALYSIS
+
+# Define the Decision Tree model
+dt_spec <- decision_tree(tree_depth = 10, min_n = 5) %>%
+  set_engine("rpart") %>%
+  set_mode("regression")
+
+# Create a recipe for preprocessing
+recipe <- recipe(value ~ CMAQ + zcta_area + imp_a500 + imp_a1000 + imp_a5000 + imp_a10000 + imp_a15000 + log_pri_length_25000 + log_prisec_length_5000 + log_prisec_length_10000 + log_prisec_length_15000 + log_prisec_length_25000 + log_nei_2008_pm25_sum_10000 + log_nei_2008_pm25_sum_15000 + log_nei_2008_pm25_sum_25000 + log_nei_2008_pm10_sum_10000 + log_nei_2008_pm10_sum_15000 + log_nei_2008_pm10_sum_25000 + urc2013 + urc2006 + aod, data = train)
+
+# Define the workflow
+workflow <- workflow() %>%
+  add_model(dt_spec) %>%
+  add_recipe(recipe)
+
+# Fit the model
+fit_dt <- workflow %>% fit(data = train)
+
+# Predict on the test set
+predictions <- predict(fit_dt, new_data = test) %>%
+  bind_cols(test) %>%
+  mutate(resid = value - .pred)
+
+# Calculate RMSE
+rmse <- sqrt(mean(predictions$resid^2))
+rmse
+
+#2.780553
+```
+
+```{r}
+# RANDOM FOREST ANALYSIS
+set.seed(322)
+
+# Define the Random Forest model
+rf_spec <- rand_forest(trees = 150, mode = "regression") %>%
+  set_engine("randomForest") %>%
+  set_mode("regression")
+
+# Recipe for preprocessing
+recipe <- recipe(value ~ CMAQ + zcta_area + imp_a500 + imp_a1000 + imp_a5000 + imp_a10000 + imp_a15000 + log_pri_length_25000 + log_prisec_length_5000 + log_prisec_length_10000 + log_prisec_length_15000 + log_prisec_length_25000 + log_nei_2008_pm25_sum_10000 + log_nei_2008_pm25_sum_15000 + log_nei_2008_pm25_sum_25000 + log_nei_2008_pm10_sum_10000 + log_nei_2008_pm10_sum_15000 + log_nei_2008_pm10_sum_25000 + urc2013 + urc2006 + aod, data = train)
+
+# Define the workflow
+workflow <- workflow() %>%
+  add_model(rf_spec) %>%
+  add_recipe(recipe)
+
+# Fit the model
+fit_rf <- workflow %>% fit(data = train)
+
+# Predict on the test set
+predictions <- predict(fit_rf, new_data = test) %>%
+  bind_cols(test) %>%
+  mutate(resid = value - .pred)
+
+
+# Calculate RMSE
+rmse <- sqrt(mean(predictions$resid^2))
+rmse
+
+#2.375692
+```
+
+## Results
+
+**The development of the prediction models was done mostly using tidymodels, with the exception being linear regression, which was in the base tidyverse package. We compared the models based on their RMSE values. We split the data into both training and testing sets, with 80% of the data belonging to the training set. This ensured that our models wouldn't be biased due to overfitting.**
+
+```{r}
+## Random Forest Scatterplot (predicted vs observed values)
+
+ggplot(predictions, aes(x = value, y = .pred)) +
+  geom_point(alpha = 0.5) +  # Adding some transparency to points
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +  # Adds a regression line without confidence envelope
+  labs(x = "Observed Values", y = "Predicted Values", title = "Observed vs. Predicted Values for Random Forests") +
+  theme_minimal() 
+```
+
+```{r}
+#RMSE VALUES TABLE
+
+#Manually created a table with the RMSE values and the name of the method used. 
+rmse_values <- c(2.641683, 2.430612, 2.780553,2.375692)
+model_names <- c("Linear Regression", "K-Nearest Neighbors", "Decision Trees","Random Forests")
+
+rmse_summary <- data.frame(Model = model_names, RMSE = rmse_values)
+rmse_summary
+```
+
+**Based on these results the best model for our data set is Random Forests.**
+
+## Primary Questions
+
+**PRIMARY QUESTION 1**
+
+```{r}
+## PRIMARY QUESTION 1
+
+# For this question, we will be using the predictions data set that is based off our test data set and  has the resid column. We will be using it to measure performance. 
+
+## BEST AND WORST PREDICTIONS
+
+# Sort by the absolute values of residuals to find the best predictions
+predictive_values <- predictions %>%
+  arrange(abs(resid))
+
+#Sort by location and arrange by residual values. 
+geolocations <- predictive_values %>%
+  select(lat, lon, value, .pred, resid,state) %>% 
+  arrange(abs(resid))
+```
+
+**Answer: The 5 regions with the closest predictions from the predicted values are located near the center of the US, except for North Dakota that is up north.They are all smaller states that don't have huge metroplexes and are filled with smaller cities. This means there is less variation in the variables, which leads to better model accuracy. The 5 bottom down are all in California, which makes sense as it is overpopulated and there is a lot of traffic, which means more pollution. Since California is an outlier state in terms of its variables, our model is less accurate when predicting its values.**
+
+**PRIMARY QUESTION 2**
+
+**Answer: Overall, the locations where our model performs best are states that do not contain major cities, and population is more rural. On the other hand, our model performs worst on states with big metropolitan cities. Some variable that our data set does not include is distance from high school campus and the funding that the schools receive. Closer distance and more funding can indicate better quality of life for the people in the area which would certainly have some relation to PM2.5 levels.**
+
+**PRIMARY QUESTION 3**
+
+```{r}
+# RANDOM FOREST ANALYSIS WITHOUT CMAQ OR AOD
+set.seed(322)
+
+# Define the Random Forest model
+rf_spec <- rand_forest(trees = 150, mode = "regression") %>%
+  set_engine("randomForest") %>%
+  set_mode("regression")
+
+# Recipe for preprocessing
+recipe <- recipe(value ~ zcta_area + imp_a500 + imp_a1000 + imp_a5000 + imp_a10000 + imp_a15000 + log_pri_length_25000 + log_prisec_length_5000 + log_prisec_length_10000 + log_prisec_length_15000 + log_prisec_length_25000 + log_nei_2008_pm25_sum_10000, data = train)
+
+# Define the workflow
+workflow <- workflow() %>%
+  add_model(rf_spec) %>%
+  add_recipe(recipe)
+
+# Fit the model
+fit_rf <- workflow %>% fit(data = train)
+
+# Predict on the test set
+predictions <- predict(fit_rf, new_data = test) %>%
+  bind_cols(test) %>%
+  mutate(resid = value - .pred)
+
+
+# Calculate RMSE
+rmse <- sqrt(mean(predictions$resid^2))
+rmse
+
+#2.631864
+```
+
+**Answer: Our RMSE whenever we take out CMAQ and aod from the prediction is 2.631864, which is higher than whenever we do include them in our original random forest analysis which gives us 2.375692.**
+
+**PRIMARY QUESTION 4**
+
+```{r}
+geolocations %>% 
+  arrange(value)
+```
+
+**Answer: Both Alaska and Hawaii have low levels of PM2.5 compared to other states in the US. We looked at the residuals from the locations that also have low PM2.5 values and we observed that our model overpredicts the PM2.5 for locations with low PM2.5 values. Based on this trend, we can say that the residual for Alaska and Hawaii according to our model will be a negative number.**
+
+## Discussion
+
+We learned that in model predictions, it's easier for models to predict typical values, or rather, values that fall in the middle of our dataset. Values from locations such as New Mexico and California, which are outliers in terms of PM2.5 level, both in the positive and negative directions, are difficult for our model to predict as the statistics don't differ as much as the PM2.5 values do.
+
+Creating the models was fairly simple, as the code has been provided by the standard libraries. However, it was difficult to decide which models would best fit our dataset and which variables we should use when training our model.
+
+Our model performed about as well as we expected, though it had a slightly higher RMSE than we had hoped for. This may be because our model is having trouble detecting outlier locations such as California, which has a high residual value.
+
+We did the entire project together, with each partner contributing equally.
